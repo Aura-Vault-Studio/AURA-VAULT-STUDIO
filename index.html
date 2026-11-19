@@ -1,27 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" class="scroll-smooth">
 <head>
-    <meta name="google-site-verification" content="v3DU7zOt5lIzg4MF3DSPO3nNZ6lMq2C-zhoAhJ8BJ6c" />
-    <meta name="description" content="Discover AURA VAULT STUDIO, a curated wallpaper destination for high-quality 4K and 8K wallpapers. Explore wallpapers and upload your own favourites." />
-    <meta name="robots" content="index, follow, max-image-preview:large" />
-    <link rel="canonical" href="https://aura-vault-studio.github.io/AURA-VAULT-STUDIO/" />
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="AURA VAULT STUDIO" />
-    <meta property="og:title" content="AURA VAULT STUDIO | 4K &amp; 8K Wallpapers" />
-    <meta property="og:description" content="Discover high-quality 4K and 8K wallpapers at AURA VAULT STUDIO. Explore the collection and upload your own favourites." />
-    <meta property="og:url" content="https://aura-vault-studio.github.io/AURA-VAULT-STUDIO/" />
-    <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="AURA VAULT STUDIO | 4K &amp; 8K Wallpapers" />
-    <meta name="twitter:description" content="Discover high-quality 4K and 8K wallpapers at AURA VAULT STUDIO." />
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "AURA VAULT STUDIO",
-      "url": "https://aura-vault-studio.github.io/AURA-VAULT-STUDIO/",
-      "description": "A wallpaper destination featuring high-quality 4K and 8K wallpapers."
-    }
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AURA Vault Studio | Secure 8K Wallpaper Marketplace</title>
@@ -912,6 +891,7 @@
         let activeCategory = "All";
         let currentHeroIndex = 0;
         let activeModalWallpaperIndex = 0;
+        let activeModalWallpaperId = null;
         let currentAuthMode = "login";
         let currentUser = null;
         let studioUnlocked = false;
@@ -927,68 +907,44 @@
             updateHeroPreviewUI();
             renderGallery();
             loadGitHubSettingsToInputs();
-            // Public visitors load creator uploads directly from the public GitHub repository.
+            // Public gallery sync: load every owner-uploaded image from the public
+            // GitHub folder so visitors on other devices see the same uploads.
             loadPublicGitHubUploads();
         });
 
         async function loadPublicGitHubUploads() {
-            const owner = 'aura-vault-studio';
-            const repo = 'AURA-VAULT-STUDIO';
-            const folder = 'images/owner-uploads';
-            const apiBase = 'https://api.github.com/repos/' + owner + '/' + repo;
+            const api = 'https://api.github.com/repos/aura-vault-studio/AURA-VAULT-STUDIO/contents/images/owner-uploads?ref=main';
             try {
-                // Ask GitHub for the actual default branch instead of assuming it is named main.
-                const repoResponse = await fetch(apiBase, {
+                const response = await fetch(api, {
                     headers: { 'Accept': 'application/vnd.github+json' },
                     cache: 'no-store'
                 });
-                if (!repoResponse.ok) throw new Error('Repository lookup failed (' + repoResponse.status + ')');
-                const repoInfo = await repoResponse.json();
-                const branch = repoInfo.default_branch;
-                if (!branch) throw new Error('GitHub default branch was not returned');
+                if (!response.ok) throw new Error('GitHub image list unavailable (' + response.status + ')');
+                const files = await response.json();
+                if (!Array.isArray(files)) return;
 
-                let allFiles = [];
-                for (let page = 1; page <= 10; page++) {
-                    const url = apiBase + '/contents/' + folder.split('/').map(encodeURIComponent).join('/') +
-                        '?ref=' + encodeURIComponent(branch) + '&per_page=100&page=' + page;
-                    const response = await fetch(url, {
-                        headers: { 'Accept': 'application/vnd.github+json' },
-                        cache: 'no-store'
-                    });
-                    if (response.status === 404) break;
-                    if (!response.ok) throw new Error('Wallpaper list failed (' + response.status + ')');
-                    const files = await response.json();
-                    if (!Array.isArray(files) || files.length === 0) break;
-                    allFiles = allFiles.concat(files);
-                    if (files.length < 100) break;
-                }
-
-                const imageFiles = allFiles.filter(function (file) {
-                    return file && file.type === 'file' &&
+                const imageFiles = files.filter(function (file) {
+                    return file && file.type === 'file' && file.download_url &&
                         /\.(jpe?g|png|webp|gif|avif)$/i.test(file.name || '');
-                }).sort(function (a, b) {
-                    return String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' });
                 });
 
                 let added = 0;
-                imageFiles.forEach(function (file, i) {
-                    const path = file.path || (folder + '/' + file.name);
+                imageFiles.forEach(function (file) {
+                    const path = file.path || ('images/owner-uploads/' + file.name);
                     const exists = wallpapers.some(function (item) {
                         return item.githubPath === path || item.image === file.download_url;
                     });
                     if (exists) return;
-                    const imageUrl = file.download_url ||
-                        ('https://raw.githubusercontent.com/' + owner + '/' + repo + '/' +
-                         encodeURIComponent(branch) + '/' + path.split('/').map(encodeURIComponent).join('/'));
-                    const cleanTitle = String(file.name || 'Creator Upload')
-                        .replace(/^\d+-[a-z0-9]+-/i, '').replace(/\.[^.]+$/, '')
+                    const baseName = (file.name || 'Owner upload')
+                        .replace(/^\d+-[a-z0-9]+-/i, '')
+                        .replace(/\.[^.]+$/, '')
                         .replace(/[-_]+/g, ' ').trim();
-                    wallpapers.push({
-                        id: 900000 + i,
-                        title: cleanTitle || 'Creator Upload',
+                    wallpapers.unshift({
+                        id: 'gh-' + file.sha,
+                        title: baseName || 'Owner Upload',
                         category: 'Exclusive by Creator',
                         tags: ['#CreatorExclusive', '#OwnerUpload'],
-                        image: imageUrl,
+                        image: file.download_url,
                         githubPath: path,
                         liked: false,
                         isCreatorExclusive: true,
@@ -998,7 +954,7 @@
                 });
                 if (added) renderGallery();
             } catch (error) {
-                console.warn('AURA public GitHub wallpaper loading:', error);
+                console.warn('AURA public upload sync:', error);
             }
         }
 
@@ -1356,6 +1312,7 @@
             const idx = wallpapers.findIndex(function (w) { return w.id === id; });
             if (idx === -1) return;
             activeModalWallpaperIndex = idx;
+            activeModalWallpaperId = wallpapers[idx].id;
             const item = wallpapers[idx];
 
             resetPreviewTransform();
@@ -1401,29 +1358,52 @@
         }
 
         function launchFullscreenSimulator(index) {
-            const item = wallpapers[index] || wallpapers[0];
-            activeModalWallpaperIndex = index;
-            
+            // Resolve by the selected wallpaper ID first. This avoids index mismatches
+            // between filtered galleries, the hero carousel and the preview modal.
+            let item = null;
+            const modal = document.getElementById('previewModal');
+            const modalIsOpen = modal && !modal.classList.contains('hidden');
+            if (modalIsOpen && activeModalWallpaperId !== null) {
+                item = wallpapers.find(function (w) { return String(w.id) === String(activeModalWallpaperId); });
+            }
+            if (!item && Number.isInteger(Number(index))) item = wallpapers[Number(index)];
+            if (!item && activeModalWallpaperId !== null) {
+                item = wallpapers.find(function (w) { return String(w.id) === String(activeModalWallpaperId); });
+            }
+            if (!item) item = wallpapers[0];
+            if (!item || !item.image) {
+                showToast('Wallpaper unavailable', 'This wallpaper image could not be loaded. Please refresh the page.');
+                return;
+            }
+
+            const resolvedIndex = wallpapers.findIndex(function (w) { return String(w.id) === String(item.id); });
+            if (resolvedIndex >= 0) activeModalWallpaperIndex = resolvedIndex;
+            activeModalWallpaperId = item.id;
+
             closePreviewModal();
 
             const sim = document.getElementById('fullscreenSimulator');
             const fsImg = document.getElementById('fsImgElement');
             if (fsImg) {
+                fsImg.onerror = function () {
+                    showToast('Image unavailable', 'This wallpaper image link is not accessible on this device.');
+                };
+                fsImg.src = '';
                 fsImg.src = item.image;
             }
-            document.getElementById('fsTitle').innerText = item.title;
+            document.getElementById('fsTitle').innerText = item.title || 'AURA Vault Studio';
             document.getElementById('fsRatioBadge').innerText = detectedProfileLabel;
 
             sim.classList.remove('hidden');
             sim.classList.add('flex');
 
+            // Keep the CSS fullscreen simulator usable even on browsers that reject
+            // the native Fullscreen API (common on some mobile in-app browsers).
             try {
-                if (sim.requestFullscreen) {
-                    sim.requestFullscreen().catch(function () {});
-                } else if (sim.webkitRequestFullscreen) {
-                    sim.webkitRequestFullscreen();
-                } else if (document.documentElement.requestFullscreen) {
-                    document.documentElement.requestFullscreen().catch(function () {});
+                const request = sim.requestFullscreen || sim.webkitRequestFullscreen;
+                if (request) {
+                    const result = request.call(sim);
+                    if (result && typeof result.catch === 'function') result.catch(function () {});
                 }
             } catch (e) {}
         }
